@@ -141,4 +141,3 @@ class SQLiteStore:
                 yield connection
         finally:
             connection.close()
-
