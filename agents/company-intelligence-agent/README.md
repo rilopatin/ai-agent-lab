@@ -27,6 +27,16 @@ python -m company_intel crawl --limit 3
 Without `--limit`, `crawl` processes every company in the latest portfolio
 snapshot, including companies added by later scans.
 
+Prepare compact, source-linked evidence from the latest crawl without calling
+an LLM:
+
+```bash
+python -m company_intel extract
+```
+
+The evidence export keeps companies without usable pages as
+`no_content_available` instead of treating them as extraction failures.
+
 Specific companies can be selected by repeating `--company`:
 
 ```bash

@@ -9,6 +9,7 @@ from pathlib import Path
 from .exporting import export_scan
 from .fetch import FetchError, PageFetcher
 from .crawling import CompanySiteCrawler, export_access_audit, export_crawls
+from .extraction import export_extraction, extract_crawl_file, latest_crawl
 from .monitor import PortfolioMonitor
 from .robots_audit import RobotsInspector, export_robots_audit
 from .storage import SQLiteStore
@@ -60,6 +61,11 @@ def build_parser() -> argparse.ArgumentParser:
         "--company", action="append", default=[],
         help="inspect a named company; may be supplied more than once",
     )
+    extract = subparsers.add_parser(
+        "extract", help="prepare structured evidence from a company crawl"
+    )
+    extract.add_argument("--input", help="company_sites JSON; defaults to latest export")
+    extract.add_argument("--export-dir", default="data/exports")
     return parser
 
 
@@ -77,6 +83,21 @@ def apply_url_overrides(companies, path: str):
 
 def main(argv: list[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
+    if args.command == "extract":
+        try:
+            input_path = Path(args.input) if args.input else latest_crawl(args.export_dir)
+            payload = extract_crawl_file(input_path)
+        except (FileNotFoundError, json.JSONDecodeError) as exc:
+            print(f"extract failed: {exc}", file=sys.stderr)
+            return 1
+        path = export_extraction(payload, args.export_dir)
+        print(json.dumps({
+            "companies": payload["company_count"],
+            "evidence_ready": payload["evidence_ready"],
+            "no_content_available": payload["no_content_available"],
+            "export": str(path),
+        }, indent=2))
+        return 0
     if args.command == "audit-robots":
         store = SQLiteStore(args.database)
         store.initialize()
