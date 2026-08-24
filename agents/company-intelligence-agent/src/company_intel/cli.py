@@ -13,6 +13,9 @@ from .extraction import export_extraction, extract_crawl_file, latest_crawl
 from .monitor import PortfolioMonitor
 from .robots_audit import RobotsInspector, export_robots_audit
 from .storage import SQLiteStore
+from .analysis import (
+    AnalysisError, analyze_evidence_file, export_analysis, latest_evidence,
+)
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -66,6 +69,15 @@ def build_parser() -> argparse.ArgumentParser:
     )
     extract.add_argument("--input", help="company_sites JSON; defaults to latest export")
     extract.add_argument("--export-dir", default="data/exports")
+    analyze = subparsers.add_parser(
+        "analyze", help="analyze one company with a local Ollama model"
+    )
+    analyze.add_argument("--company", required=True, help="exact company name")
+    analyze.add_argument("--input", help="company_evidence JSON; defaults to latest export")
+    analyze.add_argument("--export-dir", default="data/exports")
+    analyze.add_argument("--model", default="qwen3:8b")
+    analyze.add_argument("--ollama-url", default="http://localhost:11434/api/chat")
+    analyze.add_argument("--timeout", type=int, default=300)
     return parser
 
 
@@ -83,6 +95,26 @@ def apply_url_overrides(companies, path: str):
 
 def main(argv: list[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
+    if args.command == "analyze":
+        try:
+            input_path = Path(args.input) if args.input else latest_evidence(args.export_dir)
+            payload = analyze_evidence_file(
+                input_path, args.company, model=args.model,
+                endpoint=args.ollama_url, timeout=args.timeout,
+            )
+            path = export_analysis(payload, args.export_dir)
+        except (FileNotFoundError, json.JSONDecodeError, AnalysisError) as exc:
+            print(f"analyze failed: {exc}", file=sys.stderr)
+            return 1
+        result = payload["analysis"]
+        print(json.dumps({
+            "company": result["company"],
+            "status": result["analysis_status"],
+            "model": result["model"],
+            "facts": sum(len(items) for items in result["facts"].values()),
+            "export": str(path),
+        }, indent=2))
+        return 0
     if args.command == "extract":
         try:
             input_path = Path(args.input) if args.input else latest_crawl(args.export_dir)

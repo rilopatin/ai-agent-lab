@@ -106,3 +106,23 @@ python -m unittest discover -s tests -v
 
 Next: company-site crawling, evidence extraction, HyperVision-fit analysis,
 news monitoring, and email digests.
+### Analyze one company locally with Ollama
+
+After `extract`, run a source-grounded analysis with the local Qwen model:
+
+```cmd
+set PYTHONPATH=src && python -m company_intel analyze --company "Circle Optics"
+```
+
+The command sends only selected evidence to `http://localhost:11434`, requires
+structured JSON, and removes facts whose source URL was not supplied to the model.
+Evidence is split into small thematic groups so the local model stays within its
+4096-token context instead of dropping information from a long company profile.
+Each accepted fact must also contain a verbatim quote that the program can find
+inside the supplied source snippet. The final summary is generated once, using
+only facts that passed these checks.
+Before the model runs, deterministic relevance rules remove third-party
+leadership mentions, generic industry news, and generic technology statements.
+Duplicate statements are retained in only one category.
+The program also verifies that a quote belongs to the same category as the fact
+and that the statement's meaningful words are substantially supported by it.
