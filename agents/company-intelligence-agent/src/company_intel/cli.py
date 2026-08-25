@@ -14,7 +14,8 @@ from .monitor import PortfolioMonitor
 from .robots_audit import RobotsInspector, export_robots_audit
 from .storage import SQLiteStore
 from .analysis import (
-    AnalysisError, analyze_evidence_file, export_analysis, latest_evidence,
+    AnalysisError, analyze_all_evidence, analyze_evidence_file,
+    export_analysis, export_analysis_batch, latest_evidence,
 )
 
 
@@ -70,14 +71,24 @@ def build_parser() -> argparse.ArgumentParser:
     extract.add_argument("--input", help="company_sites JSON; defaults to latest export")
     extract.add_argument("--export-dir", default="data/exports")
     analyze = subparsers.add_parser(
-        "analyze", help="analyze one company with a local Ollama model"
+        "analyze", help="analyze company evidence with a local Ollama model"
     )
-    analyze.add_argument("--company", required=True, help="exact company name")
+    target = analyze.add_mutually_exclusive_group(required=True)
+    target.add_argument("--company", help="exact company name")
+    target.add_argument("--all", action="store_true", help="analyze the entire evidence file")
     analyze.add_argument("--input", help="company_evidence JSON; defaults to latest export")
     analyze.add_argument("--export-dir", default="data/exports")
     analyze.add_argument("--model", default="qwen3:8b")
     analyze.add_argument("--ollama-url", default="http://localhost:11434/api/chat")
     analyze.add_argument("--timeout", type=int, default=900)
+    analyze.add_argument("--request-retries", type=int, default=1)
+    analyze.add_argument(
+        "--checkpoint", default="data/analysis/company_analysis_checkpoint.json"
+    )
+    analyze.add_argument(
+        "--refresh-company", action="append", default=[],
+        help="with --all, force a named company to be analyzed again",
+    )
     return parser
 
 
@@ -98,11 +109,37 @@ def main(argv: list[str] | None = None) -> int:
     if args.command == "analyze":
         try:
             input_path = Path(args.input) if args.input else latest_evidence(args.export_dir)
+            if args.all:
+                payload = analyze_all_evidence(
+                    input_path, args.checkpoint, model=args.model,
+                    endpoint=args.ollama_url, timeout=args.timeout,
+                    retries=args.request_retries,
+                    refresh_companies=args.refresh_company,
+                    progress=lambda index, total, company, status: print(
+                        f"[{index}/{total}] {company}: {status}", flush=True
+                    ),
+                )
+                path = export_analysis_batch(payload, args.export_dir)
+                print(json.dumps({
+                    "companies": payload["company_count"],
+                    "completed": payload["completed"],
+                    "analyzed": payload["analyzed"],
+                    "no_content_available": payload["no_content_available"],
+                    "no_verified_facts": payload["no_verified_facts"],
+                    "failed": payload["failed"],
+                    "checkpoint": payload["checkpoint"],
+                    "export": str(path),
+                }, indent=2))
+                return 0 if payload["failed"] == 0 else 2
             payload = analyze_evidence_file(
                 input_path, args.company, model=args.model,
                 endpoint=args.ollama_url, timeout=args.timeout,
+                retries=args.request_retries,
             )
             path = export_analysis(payload, args.export_dir)
+        except KeyboardInterrupt:
+            print("\nanalyze interrupted; completed companies remain in the checkpoint")
+            return 130
         except (FileNotFoundError, json.JSONDecodeError, AnalysisError) as exc:
             print(f"analyze failed: {exc}", file=sys.stderr)
             return 1

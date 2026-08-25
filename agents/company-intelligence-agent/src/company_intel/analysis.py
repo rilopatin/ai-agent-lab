@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import os
 import re
 import urllib.error
 import urllib.request
@@ -12,6 +13,19 @@ from typing import Callable
 CATEGORIES = (
     "leadership", "products", "technology", "applications",
     "funding", "locations", "news",
+)
+LEADERSHIP_ROLE_PATTERN = re.compile(
+    r"\b(?:co[- ]?founder|founder|ceo|cto|cfo|coo|chief\s+[a-z]+(?:\s+[a-z]+)?"
+    r"|president|vice president|vp|svp|director|head of|board (?:chair|chairman|member|advisor))\b",
+    re.IGNORECASE,
+)
+NEWS_EVENT_PATTERN = re.compile(
+    r"\b(?:announc\w*|sign(?:ed|s)?|partnered|formed|engaged|enter(?:ed|s)?|"
+    r"launch(?:ed|es|ing)?|feature(?:d|s)?|contract(?:ed)?|won|winning|recogniz\w*|"
+    r"select(?:ed|s)?|award(?:ed|s)?|receiv(?:ed|es)?|participat\w*|began|beginning|"
+    r"secur(?:ed|es)|collaborat\w*|rais(?:ed|es|ing)|acquir\w*|appoint\w*|"
+    r"open(?:ed|s|ing)?)\b",
+    re.IGNORECASE,
 )
 EVIDENCE_GROUPS = (
     ("leadership", "locations"),
@@ -81,15 +95,19 @@ def _compact_profile(
         company_is_named = bool(company_name and company_name in snippet)
         company_is_in_title = bool(company_name and company_name in title)
         if category == "leadership":
-            return company_is_named or company_is_in_title or any(
-                marker in url for marker in ("/team", "/about", "/leadership", "/people")
+            has_role = bool(LEADERSHIP_ROLE_PATTERN.search(snippet))
+            return has_role and (
+                company_is_named or company_is_in_title or any(
+                    marker in url
+                    for marker in ("/team", "/about", "/leadership", "/people")
+                )
             )
         if category == "products":
             return not any(marker in snippet for marker in (
                 "how do we ", "our mission is", " exists to ",
             ))
         if category == "news":
-            return company_is_named
+            return company_is_named and bool(NEWS_EVENT_PATTERN.search(snippet))
         if category == "locations":
             company_positions = [
                 match.start() for match in re.finditer(re.escape(company_name), snippet)
@@ -188,6 +206,7 @@ def _model_request(
     endpoint: str,
     timeout: int,
     transport: Callable[[str, dict, int], dict],
+    retries: int,
 ) -> dict:
     company = compact["company"]
     prompt = (
@@ -215,7 +234,7 @@ def _model_request(
         "options": {"temperature": 0, "num_ctx": 4096},
         "keep_alive": "5m",
     }
-    response = transport(endpoint, payload, timeout)
+    response = _transport_with_retries(transport, endpoint, payload, timeout, retries)
     try:
         return json.loads(response["message"]["content"])
     except (KeyError, TypeError, json.JSONDecodeError) as exc:
@@ -224,6 +243,22 @@ def _model_request(
 
 def _normalize_text(value: str) -> str:
     return " ".join(value.casefold().split())
+
+
+def _transport_with_retries(
+    transport: Callable[[str, dict, int], dict],
+    endpoint: str,
+    payload: dict,
+    timeout: int,
+    retries: int,
+) -> dict:
+    for attempt in range(max(retries, 0) + 1):
+        try:
+            return transport(endpoint, payload, timeout)
+        except AnalysisError:
+            if attempt >= max(retries, 0):
+                raise
+    raise AnalysisError("local Ollama request failed")
 
 
 def _quote_is_present(
@@ -256,6 +291,41 @@ def _statement_is_supported(statement: str, quote: str) -> bool:
     return len(statement_words & quote_words) / len(statement_words) >= 0.55
 
 
+def _fact_is_sane(category: str, statement: str, quote: str) -> bool:
+    combined = f"{statement} {quote}"
+    if category == "leadership" and not LEADERSHIP_ROLE_PATTERN.search(statement):
+        return False
+    if category == "funding" and re.search(r"(?<!\d)0,\d{3}\b", combined):
+        return False
+    if category == "funding" and not (
+        re.search(
+            r"\b(?:rais(?:e|ed|ing)|fund(?:ing|ed)?|invest(?:ment|ed|or)?|grant|seed|"
+            r"series [a-z]|capital|financ(?:e|ing)|usd|eur|million|billion|thousand)\b|[$€£]",
+            statement,
+            re.IGNORECASE,
+        )
+        or re.search(r"\b(?:SBIR|STTR)\b.*\baward", statement, re.IGNORECASE)
+    ):
+        return False
+    if category == "news" and not NEWS_EVENT_PATTERN.search(statement):
+        return False
+    if category == "technology" and re.search(
+        r"\b(?:intellectual integrity|diversity and collaboration|open communication)\b",
+        statement,
+        re.IGNORECASE,
+    ):
+        return False
+    if re.search(r"\b(?:a|an|the|to|of|for|with)\.$", statement, re.IGNORECASE):
+        return False
+    if re.search(
+        r"\b(?:with|by|from|at)\s+[A-Z][A-Za-z]{0,2}\.\s+"
+        r"(?:based|for|to|in|on|and)\b",
+        statement,
+    ):
+        return False
+    return True
+
+
 def _summarize_verified_facts(
     company: str,
     facts: dict[str, list[dict]],
@@ -263,6 +333,7 @@ def _summarize_verified_facts(
     endpoint: str,
     timeout: int,
     transport: Callable[[str, dict, int], dict],
+    retries: int,
 ) -> str:
     statements = [
         item["statement"]
@@ -292,7 +363,7 @@ def _summarize_verified_facts(
         "options": {"temperature": 0, "num_ctx": 4096},
         "keep_alive": "5m",
     }
-    response = transport(endpoint, payload, timeout)
+    response = _transport_with_retries(transport, endpoint, payload, timeout, retries)
     try:
         result = json.loads(response["message"]["content"])
         return result.get("summary", "").strip()
@@ -304,7 +375,8 @@ def analyze_profile(
     profile: dict,
     model: str = "qwen3:8b",
     endpoint: str = "http://localhost:11434/api/chat",
-    timeout: int = 300,
+    timeout: int = 900,
+    retries: int = 1,
     transport: Callable[[str, dict, int], dict] = _default_transport,
 ) -> dict:
     if profile.get("extraction_status") != "evidence_ready":
@@ -318,17 +390,30 @@ def analyze_profile(
         }
     merged = {category: [] for category in CATEGORIES}
     globally_seen: set[str] = set()
-    for group in EVIDENCE_GROUPS:
-        compact = _compact_profile(profile, group)
+
+    def process_group(group: tuple[str, ...], maximum_per_category: int = 5) -> None:
+        compact = _compact_profile(profile, group, maximum_per_category)
         if not any(compact["evidence"].values()):
-            continue
+            return
         allowed_urls = {
             item["source_url"]
             for items in compact["evidence"].values()
             for item in items
             if item["source_url"]
         }
-        raw = _model_request(compact, model, endpoint, timeout, transport)
+        try:
+            raw = _model_request(compact, model, endpoint, timeout, transport, retries)
+        except AnalysisError as exc:
+            if "timeout" not in str(exc).casefold():
+                raise
+            if len(group) > 1:
+                for category in group:
+                    process_group((category,), maximum_per_category)
+                return
+            if maximum_per_category > 2:
+                process_group(group, 2)
+                return
+            raise
         validated = _validate_result(raw, allowed_urls)
         for category in group:
             for item in validated["facts"][category]:
@@ -340,17 +425,24 @@ def analyze_profile(
                     and _statement_is_supported(
                         item["statement"], item["evidence_quote"]
                     )
+                    and _fact_is_sane(
+                        category, item["statement"], item["evidence_quote"]
+                    )
                     and statement_key not in globally_seen
                 ):
                     merged[category].append(item)
                     globally_seen.add(statement_key)
+
+    for group in EVIDENCE_GROUPS:
+        process_group(group)
     summary = _summarize_verified_facts(
-        profile.get("company", ""), merged, model, endpoint, timeout, transport
+        profile.get("company", ""), merged, model, endpoint, timeout, transport, retries
     )
+    fact_count = sum(len(items) for items in merged.values())
     return {
         "company": profile.get("company", ""),
         "website": profile.get("website", ""),
-        "analysis_status": "analyzed",
+        "analysis_status": "analyzed" if fact_count else "no_verified_facts",
         "model": model,
         "summary": summary,
         "facts": merged,
@@ -383,4 +475,109 @@ def export_analysis(payload: dict, export_dir: str | Path) -> Path:
     directory.mkdir(parents=True, exist_ok=True)
     path = directory / f"company_analysis_{utc_stamp()}.json"
     path.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
+    return path
+
+
+def _write_json_atomic(path: Path, payload: dict) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    temporary = path.with_suffix(path.suffix + ".tmp")
+    temporary.write_text(
+        json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8"
+    )
+    os.replace(temporary, path)
+
+
+def analyze_all_evidence(
+    input_path: str | Path,
+    checkpoint_path: str | Path,
+    model: str = "qwen3:8b",
+    progress: Callable[[int, int, str, str], None] | None = None,
+    refresh_companies: list[str] | None = None,
+    **kwargs,
+) -> dict:
+    source = Path(input_path)
+    evidence = json.loads(source.read_text(encoding="utf-8"))
+    profiles = evidence.get("profiles", [])
+    checkpoint = Path(checkpoint_path)
+    state = None
+    if checkpoint.exists():
+        try:
+            candidate = json.loads(checkpoint.read_text(encoding="utf-8"))
+            if candidate.get("source_file") == str(source) and candidate.get("model") == model:
+                state = candidate
+        except json.JSONDecodeError:
+            state = None
+    if state is None:
+        state = {
+            "source_file": str(source),
+            "model": model,
+            "results": {},
+            "errors": {},
+        }
+
+    requested_refresh = {name.casefold() for name in (refresh_companies or [])}
+    known_companies = {
+        profile.get("company", "").casefold() for profile in profiles
+    }
+    unknown_refresh = sorted(requested_refresh - known_companies)
+    if unknown_refresh:
+        raise AnalysisError(
+            "company not found in evidence: " + ", ".join(unknown_refresh)
+        )
+    for company in list(state["results"]):
+        if company.casefold() in requested_refresh:
+            state["results"].pop(company, None)
+            state["errors"].pop(company, None)
+
+    total = len(profiles)
+    for index, profile in enumerate(profiles, start=1):
+        company = profile.get("company", "")
+        if company in state["results"]:
+            if progress:
+                progress(index, total, company, "already_completed")
+            continue
+        try:
+            result = analyze_profile(profile, model=model, **kwargs)
+        except AnalysisError as exc:
+            state["errors"][company] = str(exc)
+            status = "failed"
+        else:
+            state["results"][company] = result
+            state["errors"].pop(company, None)
+            status = result["analysis_status"]
+        _write_json_atomic(checkpoint, state)
+        if progress:
+            progress(index, total, company, status)
+
+    ordered_results = [
+        state["results"][profile.get("company", "")]
+        for profile in profiles
+        if profile.get("company", "") in state["results"]
+    ]
+    return {
+        "source_file": str(source),
+        "model": model,
+        "company_count": total,
+        "completed": len(ordered_results),
+        "analyzed": sum(
+            item["analysis_status"] == "analyzed" for item in ordered_results
+        ),
+        "no_content_available": sum(
+            item["analysis_status"] == "no_content_available" for item in ordered_results
+        ),
+        "no_verified_facts": sum(
+            item["analysis_status"] == "no_verified_facts" for item in ordered_results
+        ),
+        "failed": len(state["errors"]),
+        "errors": state["errors"],
+        "analyses": ordered_results,
+        "checkpoint": str(checkpoint),
+    }
+
+
+def export_analysis_batch(payload: dict, export_dir: str | Path) -> Path:
+    directory = Path(export_dir)
+    directory.mkdir(parents=True, exist_ok=True)
+    path = directory / f"company_analysis_all_{utc_stamp()}.json"
+    _write_json_atomic(path, payload)
     return path

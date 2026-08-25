@@ -132,3 +132,13 @@ even when the page text itself uses only a product name such as Argonaut.
 Location evidence is accepted only when the target company name appears close
 to the location phrase, preventing a partner's country from becoming the
 company's location. Local model requests allow up to 15 minutes by default.
+
+Analyze the entire evidence file with a resumable checkpoint:
+
+```cmd
+set PYTHONPATH=src && python -m company_intel analyze --all
+```
+
+Progress is saved after every company in `data/analysis`. Running the same
+command again skips completed companies and retries failed ones. Each local
+request is retried once by default, and Ctrl+C preserves completed work.
