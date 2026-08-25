@@ -124,5 +124,11 @@ only facts that passed these checks.
 Before the model runs, deterministic relevance rules remove third-party
 leadership mentions, generic industry news, and generic technology statements.
 Duplicate statements are retained in only one category.
-The program also verifies that a quote belongs to the same category as the fact
+The program also verifies that a quote was supplied in the same thematic batch
 and that the statement's meaningful words are substantially supported by it.
+Research questions and mission wording are not treated as delivered products.
+An official page title that includes the company name can establish relevance
+even when the page text itself uses only a product name such as Argonaut.
+Location evidence is accepted only when the target company name appears close
+to the location phrase, preventing a partner's country from becoming the
+company's location. Local model requests allow up to 15 minutes by default.

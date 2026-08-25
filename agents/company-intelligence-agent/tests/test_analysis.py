@@ -60,6 +60,75 @@ class LocalAnalysisTests(unittest.TestCase):
         self.assertIn("Zak and Ian", combined)
         self.assertIn("NASA and NSF", combined)
 
+    def test_keeps_official_product_technology_but_drops_research_questions(self):
+        profile = {
+            "company": "Archangel Autonomy",
+            "website": "https://www.archangelautonomy.com",
+            "extraction_status": "evidence_ready",
+            "contacts": {"emails": []},
+            "evidence": {
+                "products": [{
+                    "source_url": "https://www.archangelautonomy.com/company",
+                    "source_title": "Archangel Autonomy",
+                    "snippet": "How do we enable a small UAS to navigate accurately?",
+                }],
+                "technology": [{
+                    "source_url": "https://www.archangelautonomy.com/argonaut",
+                    "source_title": "Argonaut | Archangel Autonomy",
+                    "snippet": "Self-contained autonomous sensors provide immediate protection anywhere.",
+                }],
+            },
+        }
+        prompts = []
+
+        def fake_transport(endpoint, payload, timeout):
+            if "facts" not in payload["format"]["properties"]:
+                return {"message": {"content": '{"summary":""}'}}
+            prompts.append(payload["messages"][1]["content"])
+            facts = {category: [] for category in payload["format"]["properties"]["facts"]["required"]}
+            return {"message": {"content": json.dumps({"summary": "", "facts": facts})}}
+
+        analyze_profile(profile, transport=fake_transport)
+        combined = " ".join(prompts)
+        self.assertNotIn("How do we enable", combined)
+        self.assertIn("Self-contained autonomous sensors", combined)
+
+    def test_location_must_describe_target_company_not_its_partner(self):
+        profile = {
+            "company": "Fotokite",
+            "website": "https://fotokite.com",
+            "extraction_status": "evidence_ready",
+            "contacts": {"emails": []},
+            "evidence": {"locations": [
+                {
+                    "source_url": "https://fotokite.com/news",
+                    "source_title": "News | Fotokite",
+                    "snippet": (
+                        "Fotokite partners with PSTR Group, a provider of emergency "
+                        "technology solutions based in Australia."
+                    ),
+                },
+                {
+                    "source_url": "https://fotokite.com/about",
+                    "source_title": "About | Fotokite",
+                    "snippet": "Fotokite is headquartered in Zurich, Switzerland.",
+                },
+            ]},
+        }
+        prompts = []
+
+        def fake_transport(endpoint, payload, timeout):
+            if "facts" not in payload["format"]["properties"]:
+                return {"message": {"content": '{"summary":""}'}}
+            prompts.append(payload["messages"][1]["content"])
+            facts = {category: [] for category in payload["format"]["properties"]["facts"]["required"]}
+            return {"message": {"content": json.dumps({"summary": "", "facts": facts})}}
+
+        analyze_profile(profile, transport=fake_transport)
+        combined = " ".join(prompts)
+        self.assertNotIn("based in Australia", combined)
+        self.assertIn("headquartered in Zurich", combined)
+
     def test_analyzes_only_source_linked_facts_and_disables_thinking(self):
         profile = {
             "company": "Circle Optics",

@@ -77,7 +77,7 @@ def build_parser() -> argparse.ArgumentParser:
     analyze.add_argument("--export-dir", default="data/exports")
     analyze.add_argument("--model", default="qwen3:8b")
     analyze.add_argument("--ollama-url", default="http://localhost:11434/api/chat")
-    analyze.add_argument("--timeout", type=int, default=300)
+    analyze.add_argument("--timeout", type=int, default=900)
     return parser
 
 

@@ -76,16 +76,38 @@ def _compact_profile(
     def relevant(category: str, item: dict) -> bool:
         snippet = _normalize_text(item.get("snippet", ""))
         url = item.get("source_url", "").casefold()
+        title = _normalize_text(item.get("source_title", ""))
         company_name = _normalize_text(company)
         company_is_named = bool(company_name and company_name in snippet)
+        company_is_in_title = bool(company_name and company_name in title)
         if category == "leadership":
-            return company_is_named or any(
+            return company_is_named or company_is_in_title or any(
                 marker in url for marker in ("/team", "/about", "/leadership", "/people")
             )
+        if category == "products":
+            return not any(marker in snippet for marker in (
+                "how do we ", "our mission is", " exists to ",
+            ))
         if category == "news":
             return company_is_named
+        if category == "locations":
+            company_positions = [
+                match.start() for match in re.finditer(re.escape(company_name), snippet)
+            ] if company_name else []
+            location_positions = [
+                match.start()
+                for match in re.finditer(r"\b(?:based in|headquartered|headquarters)\b", snippet)
+            ]
+            return any(
+                abs(company_position - location_position) <= 45
+                for company_position in company_positions
+                for location_position in location_positions
+            )
         if category == "technology":
-            return company_is_named or snippet.startswith(("our ", "we "))
+            return (
+                company_is_named or company_is_in_title
+                or snippet.startswith(("our ", "we "))
+            )
         return True
 
     def selected(category: str) -> list[dict]:
@@ -123,6 +145,10 @@ def _default_transport(endpoint: str, payload: dict, timeout: int) -> dict:
     try:
         with urllib.request.urlopen(request, timeout=timeout) as response:
             return json.loads(response.read().decode("utf-8"))
+    except TimeoutError as exc:
+        raise AnalysisError(
+            f"local Ollama request exceeded the {timeout}-second timeout"
+        ) from exc
     except urllib.error.URLError as exc:
         raise AnalysisError(
             "cannot connect to local Ollama; make sure Ollama is running"
@@ -171,7 +197,8 @@ def _model_request(
         "external organization is not company leadership. A general opinion, event description, "
         "or industry statement is not company news. Every fact must cite exactly one source_url "
         "present in the evidence and include a short verbatim evidence_quote copied from that "
-        "source snippet. "
+        "source snippet. Write one concise sentence per fact; do not copy an entire specifications "
+        "block into the statement. "
         "If evidence is insufficient, return an empty array for that category. Keep the summary "
         f"brief and factual about {company}. Return JSON matching the supplied schema.\n\nEVIDENCE:\n"
         + json.dumps(compact, ensure_ascii=False)
@@ -208,7 +235,8 @@ def _quote_is_present(
     return any(
         item.get("source_url") == source_url
         and needle in _normalize_text(item.get("snippet", ""))
-        for item in compact["evidence"].get(category, [])
+        for items in compact["evidence"].values()
+        for item in items
     )
 
 
