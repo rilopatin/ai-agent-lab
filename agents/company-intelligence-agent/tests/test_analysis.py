@@ -10,6 +10,162 @@ from company_intel.analysis import (
 
 
 class LocalAnalysisTests(unittest.TestCase):
+    def test_builds_evidence_grounded_commercial_assessment(self):
+        profile = {
+            "company": "Operator Vision Co",
+            "website": "https://operator.example",
+            "extraction_status": "evidence_ready",
+            "contacts": {"emails": []},
+            "evidence": {
+                "products": [{
+                    "source_url": "https://operator.example/product",
+                    "source_title": "Operator Vision Co Product",
+                    "snippet": (
+                        "Operator Vision Co provides a multi-camera remote operator station "
+                        "for hazardous ground robots."
+                    ),
+                }],
+                "locations": [{
+                    "source_url": "https://operator.example/about",
+                    "source_title": "About Operator Vision Co",
+                    "snippet": "Operator Vision Co is headquartered in Haifa, Israel.",
+                }],
+            },
+        }
+
+        def transport(endpoint, payload, timeout):
+            properties = payload["format"]["properties"]
+            if "facts" in properties:
+                facts = {category: [] for category in CATEGORIES}
+                prompt = payload["messages"][1]["content"]
+                if "products" in prompt:
+                    facts["products"] = [{
+                        "statement": "Operator Vision Co provides a multi-camera remote operator station for hazardous ground robots.",
+                        "source_url": "https://operator.example/product",
+                        "evidence_quote": "Operator Vision Co provides a multi-camera remote operator station for hazardous ground robots.",
+                        "confidence": "high",
+                    }]
+                if "locations" in prompt:
+                    facts["locations"] = [{
+                        "statement": "Operator Vision Co is headquartered in Haifa, Israel.",
+                        "source_url": "https://operator.example/about",
+                        "evidence_quote": "Operator Vision Co is headquartered in Haifa, Israel.",
+                        "confidence": "high",
+                    }]
+                return {"message": {"content": json.dumps({"summary": "", "facts": facts})}}
+            if "relationship_types" in properties:
+                assessment = {
+                    "relationship_types": ["customer", "technology_partner"],
+                    "relationship_hypothesis": "A paid rFPV integration pilot may fit.",
+                    "need_evidence_refs": ["products.1"],
+                    "hypervision_relevance": "HyperVision could provide the operator visual layer.",
+                    "integration_dependencies": ["Robot video interface"],
+                    "first_engagement": "The company is working under an existing contract.",
+                    "risks": [
+                        "Operator field-of-view pain is not quantified.",
+                        "No evidence shows that the target itself is a customer."
+                    ],
+                    "potential_score": 9,
+                    "potential_score_rationale": "Budget, buyer and active timing could add three points.",
+                    "verification_questions": ["Is there an approved pilot budget?"],
+                    "customer_partner_scoring": {
+                        "human_perception_need": 3, "integration_fit": 3,
+                        "commercial_capacity": 0, "timing_and_access": 0,
+                        "rationale": "The operator use case is verified; budget and access are not."
+                    },
+                    "investor_scoring": {
+                        "applicable": False, "thesis_fit": 0, "stage_and_check_fit": 0,
+                        "strategic_leverage": 0, "track_record_and_capacity": 0,
+                        "timing_and_geography": 0, "rationale": "Not evidenced as an investor."
+                    },
+                    "geography": {
+                        "incorporation_country": "", "headquarters_country": "Israel",
+                        "russian_company": "no", "eligibility": "eligible",
+                        "israel_connection": "verified", "ukraine_connection": "not_verified",
+                        "affinity_modifier": 2, "evidence_refs": ["locations.1"]
+                    },
+                    "confidence": "insufficient_evidence",
+                    "missing_evidence": ["Budget", "Named buyer"],
+                }
+                return {"message": {"content": json.dumps(assessment)}}
+            return {"message": {"content": '{"summary":"Operator Vision Co provides remote robot operator stations."}'}}
+
+        result = analyze_profile(profile, transport=transport)
+        assessment = result["commercial_assessment"]
+        self.assertEqual(assessment["assessment_status"], "assessed")
+        self.assertEqual(assessment["customer_partner_scoring"]["base_score"], 6)
+        self.assertEqual(assessment["geography"]["affinity_modifier"], 2)
+        self.assertEqual(assessment["need_evidence_refs"], ["products.1"])
+        self.assertNotIn("investor", assessment["relationship_types"])
+        self.assertNotIn("customer", assessment["relationship_types"])
+        self.assertEqual(assessment["confidence"], "medium")
+        self.assertTrue(assessment["first_engagement"].startswith("Propose"))
+        self.assertEqual(assessment["confirmed_score"], 6)
+        self.assertEqual(assessment["potential_score"], 9)
+        self.assertEqual(assessment["verification_status"], "promising_needs_verification")
+        self.assertEqual(assessment["verification_questions"], ["Is there an approved pilot budget?"])
+
+    def test_derives_potential_lift_and_rejects_non_location_geography_refs(self):
+        profile = {
+            "company": "Potential Co", "website": "https://potential.example",
+            "extraction_status": "evidence_ready", "contacts": {"emails": []},
+            "evidence": {"technology": [{
+                "source_url": "https://potential.example/tech",
+                "source_title": "Technology",
+                "snippet": "Potential Co supplies panoramic video for remote robot operators.",
+            }]},
+        }
+
+        def transport(endpoint, payload, timeout):
+            if "facts" in payload["format"]["properties"]:
+                facts = {category: [] for category in CATEGORIES}
+                facts["technology"] = [{
+                    "statement": "Potential Co supplies panoramic video for remote robot operators.",
+                    "source_url": "https://potential.example/tech",
+                    "evidence_quote": "Potential Co supplies panoramic video for remote robot operators.",
+                    "confidence": "high",
+                }]
+                return {"message": {"content": json.dumps({"summary": "", "facts": facts})}}
+            assessment = {
+                "relationship_types": ["technology_partner"],
+                "relationship_hypothesis": "A complementary imaging partnership may fit.",
+                "need_evidence_refs": ["technology.1"],
+                "hypervision_relevance": "Panoramic video may feed the operator display.",
+                "integration_dependencies": ["Video interface"],
+                "first_engagement": "Propose a technical workshop.",
+                "risks": ["Commercial route is unknown."],
+                "potential_score": 6,
+                "potential_score_rationale": "No lift supplied.",
+                "verification_questions": [
+                    "Is there a current relationship or named opportunity?",
+                    "Is there a procurement budget for a paid pilot?",
+                ],
+                "customer_partner_scoring": {
+                    "human_perception_need": 2, "integration_fit": 3,
+                    "commercial_capacity": 1, "timing_and_access": 0,
+                    "rationale": "Complementary technology is verified.",
+                },
+                "investor_scoring": {
+                    "applicable": False, "thesis_fit": 0, "stage_and_check_fit": 0,
+                    "strategic_leverage": 0, "track_record_and_capacity": 0,
+                    "timing_and_geography": 0, "rationale": "Not an investor.",
+                },
+                "geography": {
+                    "incorporation_country": "US", "headquarters_country": "US",
+                    "russian_company": "no", "eligibility": "eligible",
+                    "israel_connection": "not_verified", "ukraine_connection": "not_verified",
+                    "affinity_modifier": 0, "evidence_refs": ["technology.1"],
+                },
+                "confidence": "medium", "missing_evidence": [],
+            }
+            return {"message": {"content": json.dumps(assessment)}}
+
+        result = analyze_profile(profile, transport=transport)["commercial_assessment"]
+        self.assertEqual(result["confirmed_score"], 6)
+        self.assertEqual(result["potential_score"], 8)
+        self.assertEqual(result["geography"]["eligibility"], "unverified")
+        self.assertEqual(result["geography"]["evidence_refs"], [])
+
     def test_retries_one_temporary_local_model_failure(self):
         profile = {
             "company": "Retry Co",
@@ -404,7 +560,7 @@ class LocalAnalysisTests(unittest.TestCase):
         result = analyze_profile(profile, transport=fake_transport)
         self.assertEqual(result["analysis_status"], "analyzed")
         self.assertEqual(len(result["facts"]["technology"]), 1)
-        self.assertEqual(len(calls), 2)
+        self.assertEqual(len(calls), 3)
         self.assertEqual(calls[0]["options"]["num_ctx"], 4096)
         self.assertEqual(
             result["summary"],

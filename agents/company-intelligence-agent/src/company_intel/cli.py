@@ -17,6 +17,7 @@ from .analysis import (
     AnalysisError, analyze_all_evidence, analyze_evidence_file,
     export_analysis, export_analysis_batch, latest_evidence,
 )
+from .reporting import export_report, latest_analysis
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -89,6 +90,11 @@ def build_parser() -> argparse.ArgumentParser:
         "--refresh-company", action="append", default=[],
         help="with --all, force a named company to be analyzed again",
     )
+    report = subparsers.add_parser(
+        "report", help="create a human-readable HyperVision relevance report"
+    )
+    report.add_argument("--input", help="analysis JSON; defaults to latest full analysis")
+    report.add_argument("--export-dir", default="data/exports")
     return parser
 
 
@@ -106,6 +112,21 @@ def apply_url_overrides(companies, path: str):
 
 def main(argv: list[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
+    if args.command == "report":
+        try:
+            input_path = Path(args.input) if args.input else latest_analysis(args.export_dir)
+            html_path, csv_path, report = export_report(input_path, args.export_dir)
+        except (FileNotFoundError, json.JSONDecodeError) as exc:
+            print(f"report failed: {exc}", file=sys.stderr)
+            return 1
+        print(json.dumps({
+            "companies": report["company_count"],
+            "high_fit": sum(item["fit"] == "high" for item in report["companies"]),
+            "medium_fit": sum(item["fit"] == "medium" for item in report["companies"]),
+            "html": str(html_path),
+            "csv": str(csv_path),
+        }, indent=2))
+        return 0
     if args.command == "analyze":
         try:
             input_path = Path(args.input) if args.input else latest_evidence(args.export_dir)
@@ -127,6 +148,7 @@ def main(argv: list[str] | None = None) -> int:
                     "no_content_available": payload["no_content_available"],
                     "no_verified_facts": payload["no_verified_facts"],
                     "failed": payload["failed"],
+                    "commercially_assessed": payload["commercially_assessed"],
                     "checkpoint": payload["checkpoint"],
                     "export": str(path),
                 }, indent=2))
@@ -149,6 +171,12 @@ def main(argv: list[str] | None = None) -> int:
             "status": result["analysis_status"],
             "model": result["model"],
             "facts": sum(len(items) for items in result["facts"].values()),
+            "commercial_assessment": result.get("commercial_assessment", {}).get(
+                "assessment_status", "not_assessed"
+            ),
+            "base_score": result.get("commercial_assessment", {}).get(
+                "customer_partner_scoring", {}
+            ).get("base_score", 0),
             "export": str(path),
         }, indent=2))
         return 0

@@ -14,6 +14,7 @@ CATEGORIES = (
     "leadership", "products", "technology", "applications",
     "funding", "locations", "news",
 )
+ANALYSIS_VERSION = "2.4.1-verification-aware-scoring"
 LEADERSHIP_ROLE_PATTERN = re.compile(
     r"\b(?:co[- ]?founder|founder|ceo|cto|cfo|coo|chief\s+[a-z]+(?:\s+[a-z]+)?"
     r"|president|vice president|vp|svp|director|head of|board (?:chair|chairman|member|advisor))\b",
@@ -32,6 +33,87 @@ EVIDENCE_GROUPS = (
     ("products", "technology", "applications"),
     ("funding", "news"),
 )
+
+RELATIONSHIP_TYPES = (
+    "customer", "technology_partner", "integrator_or_channel", "investor",
+    "supplier", "grant_partner", "competitor_or_benchmark", "no_supported_fit",
+)
+
+COMMERCIAL_SCHEMA = {
+    "type": "object",
+    "properties": {
+        "relationship_types": {
+            "type": "array",
+            "items": {"type": "string", "enum": list(RELATIONSHIP_TYPES)},
+        },
+        "relationship_hypothesis": {"type": "string"},
+        "need_evidence_refs": {"type": "array", "items": {"type": "string"}},
+        "hypervision_relevance": {"type": "string"},
+        "integration_dependencies": {"type": "array", "items": {"type": "string"}},
+        "first_engagement": {"type": "string"},
+        "risks": {"type": "array", "items": {"type": "string"}},
+        "potential_score": {"type": "integer", "minimum": 0, "maximum": 10},
+        "potential_score_rationale": {"type": "string"},
+        "verification_questions": {"type": "array", "items": {"type": "string"}},
+        "customer_partner_scoring": {
+            "type": "object",
+            "properties": {
+                "human_perception_need": {"type": "integer", "minimum": 0, "maximum": 4},
+                "integration_fit": {"type": "integer", "minimum": 0, "maximum": 3},
+                "commercial_capacity": {"type": "integer", "minimum": 0, "maximum": 2},
+                "timing_and_access": {"type": "integer", "minimum": 0, "maximum": 1},
+                "rationale": {"type": "string"},
+            },
+            "required": [
+                "human_perception_need", "integration_fit", "commercial_capacity",
+                "timing_and_access", "rationale",
+            ],
+        },
+        "investor_scoring": {
+            "type": "object",
+            "properties": {
+                "applicable": {"type": "boolean"},
+                "thesis_fit": {"type": "integer", "minimum": 0, "maximum": 3},
+                "stage_and_check_fit": {"type": "integer", "minimum": 0, "maximum": 2},
+                "strategic_leverage": {"type": "integer", "minimum": 0, "maximum": 2},
+                "track_record_and_capacity": {"type": "integer", "minimum": 0, "maximum": 2},
+                "timing_and_geography": {"type": "integer", "minimum": 0, "maximum": 1},
+                "rationale": {"type": "string"},
+            },
+            "required": [
+                "applicable", "thesis_fit", "stage_and_check_fit", "strategic_leverage",
+                "track_record_and_capacity", "timing_and_geography", "rationale",
+            ],
+        },
+        "geography": {
+            "type": "object",
+            "properties": {
+                "incorporation_country": {"type": "string"},
+                "headquarters_country": {"type": "string"},
+                "russian_company": {"type": "string", "enum": ["yes", "no", "unknown"]},
+                "eligibility": {"type": "string", "enum": ["eligible", "excluded_geography", "unverified"]},
+                "israel_connection": {"type": "string", "enum": ["verified", "not_verified"]},
+                "ukraine_connection": {"type": "string", "enum": ["verified", "not_verified"]},
+                "affinity_modifier": {"type": "integer", "minimum": 0, "maximum": 2},
+                "evidence_refs": {"type": "array", "items": {"type": "string"}},
+            },
+            "required": [
+                "incorporation_country", "headquarters_country", "russian_company",
+                "eligibility", "israel_connection", "ukraine_connection",
+                "affinity_modifier", "evidence_refs",
+            ],
+        },
+        "confidence": {"type": "string", "enum": ["high", "medium", "low", "insufficient_evidence"]},
+        "missing_evidence": {"type": "array", "items": {"type": "string"}},
+    },
+    "required": [
+        "relationship_types", "relationship_hypothesis", "need_evidence_refs",
+        "hypervision_relevance", "integration_dependencies", "first_engagement",
+        "risks", "customer_partner_scoring", "investor_scoring", "geography",
+        "confidence", "missing_evidence", "potential_score",
+        "potential_score_rationale", "verification_questions",
+    ],
+}
 
 ANALYSIS_SCHEMA = {
     "type": "object",
@@ -69,6 +151,52 @@ ANALYSIS_SCHEMA = {
 
 class AnalysisError(RuntimeError):
     pass
+
+
+def _empty_assessment(status: str = "not_assessed") -> dict:
+    return {
+        "assessment_status": status,
+        "relationship_types": [],
+        "relationship_hypothesis": "",
+        "need_evidence_refs": [],
+        "hypervision_relevance": "",
+        "integration_dependencies": [],
+        "first_engagement": "",
+        "risks": [],
+        "confirmed_score": 0,
+        "potential_score": 0,
+        "potential_score_rationale": "",
+        "verification_status": "research_needed",
+        "verification_questions": [],
+        "customer_partner_scoring": {
+            "human_perception_need": 0, "integration_fit": 0,
+            "commercial_capacity": 0, "timing_and_access": 0,
+            "base_score": 0, "rationale": "",
+        },
+        "investor_scoring": {
+            "applicable": False, "thesis_fit": 0, "stage_and_check_fit": 0,
+            "strategic_leverage": 0, "track_record_and_capacity": 0,
+            "timing_and_geography": 0, "base_score": 0, "rationale": "",
+        },
+        "geography": {
+            "incorporation_country": "", "headquarters_country": "",
+            "russian_company": "unknown", "eligibility": "unverified",
+            "israel_connection": "not_verified", "ukraine_connection": "not_verified",
+            "affinity_modifier": 0, "evidence_refs": [],
+        },
+        "confidence": "insufficient_evidence",
+        "missing_evidence": [],
+    }
+
+
+def _load_decision_profile(path: str | Path = "config/hypervision_decision_profile.json") -> dict:
+    profile_path = Path(path)
+    if not profile_path.exists():
+        raise AnalysisError(f"HyperVision decision profile not found: {profile_path}")
+    try:
+        return json.loads(profile_path.read_text(encoding="utf-8"))
+    except json.JSONDecodeError as exc:
+        raise AnalysisError("HyperVision decision profile is invalid JSON") from exc
 
 
 def utc_stamp() -> str:
@@ -371,12 +499,305 @@ def _summarize_verified_facts(
         raise AnalysisError("model did not return a valid final summary") from exc
 
 
+def _commercial_assessment(
+    company: str,
+    facts: dict[str, list[dict]],
+    model: str,
+    endpoint: str,
+    timeout: int,
+    transport: Callable[[str, dict, int], dict],
+    retries: int,
+    decision_profile_path: str | Path,
+) -> dict:
+    catalog = []
+    allowed_refs: set[str] = set()
+    for category in CATEGORIES:
+        for index, fact in enumerate(facts[category], start=1):
+            fact_id = f"{category}.{index}"
+            allowed_refs.add(fact_id)
+            catalog.append({
+                "fact_id": fact_id,
+                "category": category,
+                "statement": fact["statement"],
+                "source_url": fact["source_url"],
+                "evidence_quote": fact["evidence_quote"],
+                "confidence": fact["confidence"],
+            })
+    if not catalog:
+        return _empty_assessment("insufficient_evidence")
+    profile = _load_decision_profile(decision_profile_path)
+    prompt = (
+        "Apply the supplied HyperVision decision profile to the verified facts. "
+        "Do not reward keywords, sector similarity, defense activity, drones, cameras, "
+        "sensors, autonomy or funding by themselves. A CUSTOMER hypothesis requires a concrete "
+        "human-operator visual-perception need and a plausible HyperVision integration path. "
+        "A TECHNOLOGY-PARTNER hypothesis does not require the company itself to buy an HMD: it "
+        "may qualify when verified facts show that it supplies a complementary component needed "
+        "for a supported joint architecture, such as panoramic/EO-IR imaging, low-latency video, "
+        "embedded electronics, HMD productization, simulation integration, manufacturing, "
+        "communications or a remote platform. In that case, cite the component and supported "
+        "downstream application, describe the division of responsibilities, and score only what "
+        "the evidence supports. Do not classify the target as a CUSTOMER merely because its own "
+        "product has downstream operators: customer requires evidence that the target itself could "
+        "buy, integrate or operate HyperVision's visual interface. Do not classify a company as an "
+        "INVESTOR merely because it raised money: investor requires evidence that it deploys capital "
+        "into other companies. Use the score anchors exactly. Award timing_and_access=1 only for an "
+        "explicit current relationship, warm route, active joint work, procurement or named opportunity. "
+        "Always provide a concrete first engagement, integration dependencies, at least one risk, and "
+        "missing evidence. Also estimate potential_score: the maximum defensible customer/partner score "
+        "if specific currently-unknown facts are positively verified. It must never be lower than the "
+        "evidence-backed score, must not assume unknown facts are true, and its rationale must name the "
+        "exact assumptions. Provide concise verification questions that would confirm or reject those "
+        "assumptions. The relationship_hypothesis must be an explanatory sentence, not a label. "
+        "Keep customer, partner and investor hypotheses separate. Use only "
+        "supplied fact IDs in evidence_refs. "
+        "Do not infer incorporation, founder origin, nationality, religion, ownership or Israel/"
+        "Ukraine affinity from a name. If geography is not explicit, mark it unverified. "
+        "A founder's Russian birthplace or past alone is not a company exclusion. Exclude only "
+        "when verified facts show that the current company itself meets the Russian-company rule. "
+        "Scores must reflect evidence, and missing evidence must score zero rather than be guessed. "
+        "Return concise JSON matching the schema.\n\n"
+        f"TARGET COMPANY: {company}\n"
+        "HYPERVISION DECISION PROFILE:\n"
+        + json.dumps(profile, ensure_ascii=False)
+        + "\n\nVERIFIED FACT CATALOG:\n"
+        + json.dumps(catalog, ensure_ascii=False)
+    )
+    payload = {
+        "model": model,
+        "messages": [
+            {"role": "system", "content": "You are an evidence-grounded B2B business analyst."},
+            {"role": "user", "content": prompt},
+        ],
+        "stream": False,
+        "think": False,
+        "format": COMMERCIAL_SCHEMA,
+        "options": {"temperature": 0, "num_ctx": 4096},
+        "keep_alive": "5m",
+    }
+    response = _transport_with_retries(transport, endpoint, payload, timeout, retries)
+    try:
+        raw = json.loads(response["message"]["content"])
+    except (KeyError, TypeError, json.JSONDecodeError) as exc:
+        raise AnalysisError("model did not return a valid commercial assessment") from exc
+    if not isinstance(raw, dict):
+        raise AnalysisError("model returned an invalid commercial assessment")
+
+    result = _empty_assessment("assessed")
+    result["relationship_types"] = [
+        value for value in raw.get("relationship_types", [])
+        if value in RELATIONSHIP_TYPES
+    ]
+    for key in (
+        "relationship_hypothesis", "hypervision_relevance", "first_engagement",
+    ):
+        result[key] = str(raw.get(key, "")).strip()
+    for key in ("integration_dependencies", "risks", "missing_evidence", "verification_questions"):
+        values = raw.get(key, [])
+        result[key] = [str(value).strip() for value in values if str(value).strip()][:8]
+    result["need_evidence_refs"] = [
+        ref for ref in raw.get("need_evidence_refs", [])
+        if ref in allowed_refs and ref.split(".", 1)[0] in {
+            "products", "technology", "applications", "locations",
+        }
+    ]
+
+    customer = raw.get("customer_partner_scoring", {})
+    limits = {
+        "human_perception_need": 4, "integration_fit": 3,
+        "commercial_capacity": 2, "timing_and_access": 1,
+    }
+    for key, maximum in limits.items():
+        value = customer.get(key, 0)
+        result["customer_partner_scoring"][key] = (
+            max(0, min(maximum, value)) if isinstance(value, int) else 0
+        )
+    result["customer_partner_scoring"]["rationale"] = str(
+        customer.get("rationale", "")
+    ).strip()
+    result["customer_partner_scoring"]["base_score"] = sum(
+        result["customer_partner_scoring"][key] for key in limits
+    )
+    result["confirmed_score"] = result["customer_partner_scoring"]["base_score"]
+    potential = raw.get("potential_score", result["confirmed_score"])
+    result["potential_score"] = (
+        max(result["confirmed_score"], min(10, potential))
+        if isinstance(potential, int) else result["confirmed_score"]
+    )
+    result["potential_score_rationale"] = str(
+        raw.get("potential_score_rationale", "")
+    ).strip()
+
+    investor = raw.get("investor_scoring", {})
+    result["investor_scoring"]["applicable"] = investor.get("applicable") is True
+    investor_limits = {
+        "thesis_fit": 3, "stage_and_check_fit": 2, "strategic_leverage": 2,
+        "track_record_and_capacity": 2, "timing_and_geography": 1,
+    }
+    for key, maximum in investor_limits.items():
+        value = investor.get(key, 0)
+        result["investor_scoring"][key] = (
+            max(0, min(maximum, value))
+            if isinstance(value, int) and result["investor_scoring"]["applicable"] else 0
+        )
+    result["investor_scoring"]["rationale"] = str(
+        investor.get("rationale", "")
+    ).strip()
+    result["investor_scoring"]["base_score"] = sum(
+        result["investor_scoring"][key] for key in investor_limits
+    )
+    if not result["investor_scoring"]["applicable"]:
+        result["relationship_types"] = [
+            value for value in result["relationship_types"] if value != "investor"
+        ]
+
+    customer_denial_text = " ".join(
+        [result["customer_partner_scoring"]["rationale"]]
+        + result["risks"] + result["missing_evidence"]
+    ).casefold()
+    if (
+        "customer" in result["relationship_types"]
+        and re.search(
+            r"(?:\b(?:no|without|lack(?:s|ing)?)\b.{0,60}\bevidence\b.{0,140}"
+            r"(?:\bcustomer\b|\bbuy\w*\b|\bpurchas\w*\b|\bintegrat\w*\b|\boperat\w*\b))|"
+            r"(?:\bno evidence shows\b.{0,140}\bcustomer\b)",
+            customer_denial_text,
+        )
+    ):
+        result["relationship_types"] = [
+            value for value in result["relationship_types"] if value != "customer"
+        ]
+
+    geography = raw.get("geography", {})
+    geography_refs = [
+        ref for ref in geography.get("evidence_refs", [])
+        if ref in allowed_refs and ref.startswith("locations.")
+    ]
+    for key in ("incorporation_country", "headquarters_country"):
+        result["geography"][key] = str(geography.get(key, "")).strip()
+    for key, allowed in {
+        "russian_company": {"yes", "no", "unknown"},
+        "eligibility": {"eligible", "excluded_geography", "unverified"},
+        "israel_connection": {"verified", "not_verified"},
+        "ukraine_connection": {"verified", "not_verified"},
+    }.items():
+        value = geography.get(key)
+        if value in allowed:
+            result["geography"][key] = value
+    modifier = geography.get("affinity_modifier", 0)
+    result["geography"]["affinity_modifier"] = (
+        max(0, min(2, modifier)) if isinstance(modifier, int) else 0
+    )
+    result["geography"]["evidence_refs"] = geography_refs
+    if not geography_refs:
+        result["geography"].update({
+            "incorporation_country": "", "headquarters_country": "",
+            "russian_company": "unknown", "eligibility": "unverified",
+            "israel_connection": "not_verified", "ukraine_connection": "not_verified",
+            "affinity_modifier": 0,
+        })
+    elif result["geography"]["russian_company"] == "yes":
+        result["geography"]["eligibility"] = "excluded_geography"
+        result["geography"]["affinity_modifier"] = 0
+        result["customer_partner_scoring"]["base_score"] = 0
+        result["confirmed_score"] = 0
+        result["potential_score"] = 0
+        result["investor_scoring"]["base_score"] = 0
+
+    confidence = raw.get("confidence")
+    if confidence in {"high", "medium", "low", "insufficient_evidence"}:
+        result["confidence"] = confidence
+    if not result["integration_dependencies"]:
+        result["integration_dependencies"] = [
+            "Technical interfaces and the division of responsibilities are not yet verified."
+        ]
+    if not re.search(
+        r"\b(?:propose|schedule|conduct|validate|arrange|request|offer|demonstrate|"
+        r"introduce|discuss|workshop|meeting|pilot|feasibility)\b",
+        result["first_engagement"], re.IGNORECASE,
+    ):
+        result["first_engagement"] = (
+            "Propose a technical workshop to validate the joint architecture, interfaces, "
+            "responsibility split, and a paid pilot path."
+        )
+    if not result["risks"]:
+        result["risks"] = [
+            "Commercial interest and integration requirements are not yet verified."
+        ]
+    if result["geography"]["eligibility"] == "unverified":
+        geography_gap = "Company incorporation, headquarters and ownership require verification."
+        if geography_gap not in result["missing_evidence"]:
+            result["missing_evidence"].append(geography_gap)
+    if result["missing_evidence"] and result["confidence"] == "high":
+        result["confidence"] = "medium"
+    if (
+        result["confidence"] == "insufficient_evidence"
+        and "technology_partner" in result["relationship_types"]
+        and result["customer_partner_scoring"]["base_score"] >= 4
+        and result["need_evidence_refs"]
+    ):
+        result["confidence"] = "medium"
+    if not result["verification_questions"]:
+        result["verification_questions"] = [
+            f"Can the company confirm: {gap.rstrip('.')}?"
+            for gap in result["missing_evidence"][:5]
+        ]
+    verification_text = " ".join(
+        result["missing_evidence"] + result["verification_questions"]
+    ).casefold()
+    lift_assumptions = []
+    derived_potential = result["confirmed_score"]
+    scoring = result["customer_partner_scoring"]
+    if scoring["timing_and_access"] == 0 and re.search(
+        r"\b(?:current relationship|warm access|active joint work|procurement|"
+        r"named opportunity|commercial opportunity)\b", verification_text,
+    ):
+        derived_potential += 1
+        lift_assumptions.append("a current route, active opportunity, or procurement path is verified")
+    if scoring["commercial_capacity"] < 2 and re.search(
+        r"\b(?:budget|commercial capacity|purchasing capacity|procurement budget|"
+        r"funded pilot|customer contract)\b", verification_text,
+    ):
+        derived_potential += 2 - scoring["commercial_capacity"]
+        lift_assumptions.append("budget or procurement capacity for a paid pilot is verified")
+    if scoring["integration_fit"] < 3 and re.search(
+        r"\b(?:integration|interface|architecture compatibility|responsibilit)\w*\b",
+        verification_text,
+    ):
+        derived_potential += 3 - scoring["integration_fit"]
+        lift_assumptions.append("technical interfaces and architecture compatibility are verified")
+    if scoring["human_perception_need"] < 4 and re.search(
+        r"\b(?:operator pain|operator workflow|field.of.view pain|quantified need|"
+        r"mission.critical perception)\b", verification_text,
+    ):
+        derived_potential += 4 - scoring["human_perception_need"]
+        lift_assumptions.append("the target's mission-critical operator perception need is verified")
+    derived_potential = min(10, derived_potential)
+    if derived_potential > result["potential_score"]:
+        result["potential_score"] = derived_potential
+        result["potential_score_rationale"] = (
+            "Conditional upper score if " + "; and if ".join(lift_assumptions) + "."
+        )
+    if result["geography"]["eligibility"] == "excluded_geography":
+        result["verification_status"] = "excluded"
+    elif result["confirmed_score"] >= 7 and result["confidence"] in {"high", "medium"}:
+        result["verification_status"] = "qualified"
+    elif result["potential_score"] >= 7 or result["confirmed_score"] >= 4:
+        result["verification_status"] = "promising_needs_verification"
+    elif result["potential_score"] <= 3 and result["confidence"] in {"high", "medium"}:
+        result["verification_status"] = "low_fit"
+    else:
+        result["verification_status"] = "research_needed"
+    return result
+
+
 def analyze_profile(
     profile: dict,
     model: str = "qwen3:8b",
     endpoint: str = "http://localhost:11434/api/chat",
     timeout: int = 900,
     retries: int = 1,
+    decision_profile_path: str | Path = "config/hypervision_decision_profile.json",
     transport: Callable[[str, dict, int], dict] = _default_transport,
 ) -> dict:
     if profile.get("extraction_status") != "evidence_ready":
@@ -387,6 +808,7 @@ def analyze_profile(
             "model": None,
             "summary": "",
             "facts": {category: [] for category in CATEGORIES},
+            "commercial_assessment": _empty_assessment("insufficient_evidence"),
         }
     merged = {category: [] for category in CATEGORIES}
     globally_seen: set[str] = set()
@@ -439,6 +861,16 @@ def analyze_profile(
         profile.get("company", ""), merged, model, endpoint, timeout, transport, retries
     )
     fact_count = sum(len(items) for items in merged.values())
+    commercial_assessment = _empty_assessment("insufficient_evidence")
+    if fact_count:
+        try:
+            commercial_assessment = _commercial_assessment(
+                profile.get("company", ""), merged, model, endpoint, timeout,
+                transport, retries, decision_profile_path,
+            )
+        except AnalysisError as exc:
+            commercial_assessment = _empty_assessment("assessment_failed")
+            commercial_assessment["missing_evidence"] = [str(exc)]
     return {
         "company": profile.get("company", ""),
         "website": profile.get("website", ""),
@@ -446,6 +878,7 @@ def analyze_profile(
         "model": model,
         "summary": summary,
         "facts": merged,
+        "commercial_assessment": commercial_assessment,
     }
 
 
@@ -503,7 +936,11 @@ def analyze_all_evidence(
     if checkpoint.exists():
         try:
             candidate = json.loads(checkpoint.read_text(encoding="utf-8"))
-            if candidate.get("source_file") == str(source) and candidate.get("model") == model:
+            if (
+                candidate.get("source_file") == str(source)
+                and candidate.get("model") == model
+                and candidate.get("analysis_version") == ANALYSIS_VERSION
+            ):
                 state = candidate
         except json.JSONDecodeError:
             state = None
@@ -511,6 +948,7 @@ def analyze_all_evidence(
         state = {
             "source_file": str(source),
             "model": model,
+            "analysis_version": ANALYSIS_VERSION,
             "results": {},
             "errors": {},
         }
@@ -557,6 +995,7 @@ def analyze_all_evidence(
     return {
         "source_file": str(source),
         "model": model,
+        "analysis_version": ANALYSIS_VERSION,
         "company_count": total,
         "completed": len(ordered_results),
         "analyzed": sum(
@@ -569,6 +1008,10 @@ def analyze_all_evidence(
             item["analysis_status"] == "no_verified_facts" for item in ordered_results
         ),
         "failed": len(state["errors"]),
+        "commercially_assessed": sum(
+            item.get("commercial_assessment", {}).get("assessment_status") == "assessed"
+            for item in ordered_results
+        ),
         "errors": state["errors"],
         "analyses": ordered_results,
         "checkpoint": str(checkpoint),

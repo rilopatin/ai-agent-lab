@@ -1,0 +1,57 @@
+{
+  "version": "2.4",
+  "company_definition": "HyperVision develops patented ultra-wide-field-of-view optical visual engines and HMD architecture that preserve focused detail while restoring peripheral visual context.",
+  "offers": [
+    "advanced simulation RDK, HMD and visual engines",
+    "partner-enabled digital day/night vision HMD integration",
+    "rFPV remote-operator visual interface",
+    "paid feasibility, NRE, pilot integration, product sales, support and licensing"
+  ],
+  "qualification": {
+    "human_perception_need": {
+      "maximum": 4,
+      "anchors": "0 none; 1 adjacent possibility; 2 supported downstream operator use; 3 direct target-company workflow; 4 quantified mission-critical target-company pain"
+    },
+    "integration_fit": {
+      "maximum": 3,
+      "anchors": "0 none; 1 conceptual; 2 concrete complementary interfaces; 3 strong supported component and responsibility fit"
+    },
+    "commercial_capacity": {
+      "maximum": 2,
+      "anchors": "0 no evidence; 1 funding/revenue/commercialization evidence; 2 established budget, major program or demonstrated procurement capacity"
+    },
+    "timing_and_access": {
+      "maximum": 1,
+      "anchors": "0 no verified current route; 1 explicit current relationship, warm access, active joint work, procurement or named opportunity"
+    }
+  },
+  "investor_qualification": {
+    "thesis_fit": {"maximum": 3},
+    "stage_and_check_fit": {"maximum": 2},
+    "strategic_leverage": {"maximum": 2},
+    "track_record_and_capacity": {"maximum": 2},
+    "timing_and_geography": {"maximum": 1}
+  },
+  "geography_policy": {
+    "exclude_when": "The company is currently incorporated or headquartered in Russia, controlled by a Russian parent, or materially operates as a Russian company.",
+    "founder_birthplace_rule": "A founder being born, educated or formerly employed in Russia is not a penalty when the company is genuinely based and controlled elsewhere.",
+    "israel_modifier_maximum": 2,
+    "ukraine_modifier_maximum": 2,
+    "unknown_rule": "Unknown geography receives no bonus or penalty. Never infer origin from a name, language or appearance."
+  },
+  "evidence_rules": [
+    "Use only verified facts supplied to the assessment.",
+    "Every material conclusion must cite one or more verified fact IDs.",
+    "A customer hypothesis requires evidence of a human-operator visual-perception need.",
+    "Customer means the target company itself plausibly buys, integrates or operates the HyperVision visual interface. A downstream use case of the target company's product does not by itself prove that the target is a customer.",
+    "A technology-partner hypothesis does not require the company itself to buy an HMD. It may qualify by supplying a complementary component required by a supported joint architecture, such as panoramic or EO/IR imaging, embedded electronics, HMD productization, simulation integration, manufacturing, communications, or a remote platform.",
+    "Investor means an organization that deploys capital into other companies. Evidence that the target raised money does not make it an investor.",
+    "Sector similarity and funding alone do not prove customer or partner fit.",
+    "Return insufficient_evidence instead of inventing a score, relationship or origin.",
+    "Keep customer, partner and investor hypotheses separate.",
+    "First engagement must be a proposed action by HyperVision, not a description of the target company's existing activity.",
+    "Do not treat missing public information as evidence that a capability, budget, need or opportunity is absent.",
+    "Report an evidence-backed confirmed score separately from a potential score. The potential score is conditional and must name the unknown facts that would have to be verified.",
+    "Provide concrete verification questions and distinguish qualified, promising_needs_verification, research_needed, low_fit and excluded companies."
+  ]
+}

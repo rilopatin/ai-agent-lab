@@ -108,6 +108,24 @@ Next: company-site crawling, evidence extraction, HyperVision-fit analysis,
 news monitoring, and email digests.
 ### Analyze one company locally with Ollama
 
+Commercial analysis is governed by
+`config/hypervision_decision_profile.json`. The local model first extracts
+source-linked company facts and then applies the decision profile to classify
+the possible relationship, score customer/partner and investor fit separately,
+apply geography eligibility, identify integration dependencies, and propose an
+evidence-supported first commercial step.
+
+The report does not award relevance points for keywords such as drones,
+defense, cameras, sensors, or LiDAR. Scores come only from the structured,
+source-grounded commercial assessment. Changes to the analysis methodology
+invalidate older checkpoints automatically, so the next `analyze --all` run
+recalculates every company under the current rules.
+
+The assessment separates the evidence-backed confirmed score from a conditional
+potential score. Missing public information is not treated as proof of absence.
+Each company receives a verification status and concrete questions showing what
+must be checked before the potential score can become a confirmed score.
+
 After `extract`, run a source-grounded analysis with the local Qwen model:
 
 ```cmd
@@ -142,3 +160,17 @@ set PYTHONPATH=src && python -m company_intel analyze --all
 Progress is saved after every company in `data/analysis`. Running the same
 command again skips completed companies and retries failed ones. Each local
 request is retried once by default, and Ctrl+C preserves completed work.
+
+### Create the final HyperVision report
+
+Create a ranked HTML report for reading and a UTF-8 CSV for Excel from the
+latest complete analysis:
+
+```cmd
+set PYTHONPATH=src && python -m company_intel report
+```
+
+The relevance score is deterministic and explainable. It awards independent
+signals for imaging/computer vision, defense and security use cases, aerial
+autonomy, relevant sensors, detection/tracking, and integration potential.
+Companies without verified analysis remain visible but are not scored.
