@@ -161,7 +161,7 @@ class LocalAnalysisTests(unittest.TestCase):
             return {"message": {"content": json.dumps(assessment)}}
 
         result = analyze_profile(profile, transport=transport)["commercial_assessment"]
-        self.assertEqual(result["confirmed_score"], 6)
+        self.assertEqual(result["confirmed_score"], 5)
         self.assertEqual(result["potential_score"], 8)
         self.assertEqual(result["geography"]["eligibility"], "unverified")
         self.assertEqual(result["geography"]["evidence_refs"], [])

@@ -14,7 +14,7 @@ CATEGORIES = (
     "leadership", "products", "technology", "applications",
     "funding", "locations", "news",
 )
-ANALYSIS_VERSION = "2.4.1-verification-aware-scoring"
+ANALYSIS_VERSION = "2.4.2-verification-aware-scoring"
 LEADERSHIP_ROLE_PATTERN = re.compile(
     r"\b(?:co[- ]?founder|founder|ceo|cto|cfo|coo|chief\s+[a-z]+(?:\s+[a-z]+)?"
     r"|president|vice president|vp|svp|director|head of|board (?:chair|chairman|member|advisor))\b",
@@ -612,6 +612,18 @@ def _commercial_assessment(
         result["customer_partner_scoring"][key] = (
             max(0, min(maximum, value)) if isinstance(value, int) else 0
         )
+    has_commercial_evidence = bool(facts.get("funding")) or any(
+        re.search(
+            r"\b(?:revenue|sales|paid contract|customer contract|procurement|"
+            r"commercialization|series [a-z]|grant|award)\b",
+            f"{fact.get('statement', '')} {fact.get('evidence_quote', '')}",
+            re.IGNORECASE,
+        )
+        for category in ("products", "applications", "news")
+        for fact in facts.get(category, [])
+    )
+    if not has_commercial_evidence:
+        result["customer_partner_scoring"]["commercial_capacity"] = 0
     result["customer_partner_scoring"]["rationale"] = str(
         customer.get("rationale", "")
     ).strip()
@@ -619,11 +631,7 @@ def _commercial_assessment(
         result["customer_partner_scoring"][key] for key in limits
     )
     result["confirmed_score"] = result["customer_partner_scoring"]["base_score"]
-    potential = raw.get("potential_score", result["confirmed_score"])
-    result["potential_score"] = (
-        max(result["confirmed_score"], min(10, potential))
-        if isinstance(potential, int) else result["confirmed_score"]
-    )
+    result["potential_score"] = result["confirmed_score"]
     result["potential_score_rationale"] = str(
         raw.get("potential_score_rationale", "")
     ).strip()
@@ -750,7 +758,7 @@ def _commercial_assessment(
     scoring = result["customer_partner_scoring"]
     if scoring["timing_and_access"] == 0 and re.search(
         r"\b(?:current relationship|warm access|active joint work|procurement|"
-        r"named opportunity|commercial opportunity)\b", verification_text,
+        r"named opportunity|named buyer|commercial opportunity)\b", verification_text,
     ):
         derived_potential += 1
         lift_assumptions.append("a current route, active opportunity, or procurement path is verified")
@@ -761,7 +769,7 @@ def _commercial_assessment(
         derived_potential += 2 - scoring["commercial_capacity"]
         lift_assumptions.append("budget or procurement capacity for a paid pilot is verified")
     if scoring["integration_fit"] < 3 and re.search(
-        r"\b(?:integration|interface|architecture compatibility|responsibilit)\w*\b",
+        r"\b(?:integrat|interface|compatib|architecture|responsibilit)\w*\b",
         verification_text,
     ):
         derived_potential += 3 - scoring["integration_fit"]
