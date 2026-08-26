@@ -92,8 +92,18 @@ def build_report(analysis_payload: dict) -> dict:
             "fact_count": len(facts),
             "sources": sources,
         })
+    confidence_order = {"high": 0, "medium": 1, "low": 2, "insufficient_evidence": 3}
     companies.sort(key=lambda item: (
-        item["status"] != "analyzed", -item["score"], item["company"].casefold()
+        item["status"] != "analyzed",
+        -item["score"],
+        -item["potential_score"],
+        confidence_order.get(
+            item.get("commercial_assessment", {}).get(
+                "confidence", "insufficient_evidence"
+            ),
+            4,
+        ),
+        item["company"].casefold(),
     ))
     return {
         "source_file": analysis_payload.get("source_file", ""),
@@ -114,7 +124,7 @@ def _write_csv(report: dict, path: Path) -> None:
         writer.writeheader()
         rank = 0
         for company in report["companies"]:
-            if company["status"] == "analyzed":
+            if company["status"] == "analyzed" and company["score"] > 0:
                 rank += 1
                 displayed_rank = rank
             else:
@@ -225,7 +235,7 @@ def _write_html(report: dict, path: Path) -> None:
     cards = []
     for company in report["companies"]:
         rank = None
-        if company["status"] == "analyzed":
+        if company["status"] == "analyzed" and company["score"] > 0:
             analyzed_rank += 1
             rank = analyzed_rank
         cards.append(_company_card(company, rank))

@@ -8,6 +8,36 @@ from company_intel.reporting import build_report, export_report, score_company
 
 
 class ReportingTests(unittest.TestCase):
+    def test_tie_breaks_by_potential_score_and_does_not_rank_zero_score(self):
+        def analysis(name, confirmed, potential, confidence="medium"):
+            return {
+                "company": name, "analysis_status": "analyzed", "facts": {},
+                "commercial_assessment": {
+                    "assessment_status": "assessed",
+                    "customer_partner_scoring": {"base_score": confirmed},
+                    "potential_score": potential,
+                    "confidence": confidence,
+                    "geography": {"eligibility": "unverified", "affinity_modifier": 0},
+                },
+            }
+
+        payload = {"analyses": [
+            analysis("Alphabetical First", 3, 4),
+            analysis("Higher Potential", 3, 7, "low"),
+            analysis("No Supported Fit", 0, 0),
+        ]}
+        report = build_report(payload)
+        self.assertEqual(report["companies"][0]["company"], "Higher Potential")
+        with tempfile.TemporaryDirectory() as directory:
+            source = Path(directory) / "analysis.json"
+            source.write_text(json.dumps(payload), encoding="utf-8")
+            _, csv_path, _ = export_report(source, directory)
+            with csv_path.open(encoding="utf-8-sig") as handle:
+                rows = list(csv.DictReader(handle))
+        self.assertEqual(rows[0]["rank"], "1")
+        self.assertEqual(rows[1]["rank"], "2")
+        self.assertEqual(rows[2]["rank"], "")
+
     def test_uses_structured_assessment_and_never_keyword_scores(self):
         relevant = {
             "company": "Vision Co", "analysis_status": "analyzed",

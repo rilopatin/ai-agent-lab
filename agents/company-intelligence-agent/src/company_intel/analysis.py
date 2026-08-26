@@ -14,7 +14,7 @@ CATEGORIES = (
     "leadership", "products", "technology", "applications",
     "funding", "locations", "news",
 )
-ANALYSIS_VERSION = "2.5.3-human-visual-need-guard"
+ANALYSIS_VERSION = "2.5.4-evidence-signal-guard"
 LEADERSHIP_ROLE_PATTERN = re.compile(
     r"\b(?:co[- ]?founder|founder|ceo|cto|cfo|coo|chief\s+[a-z]+(?:\s+[a-z]+)?"
     r"|president|vice president|vp|svp|director|head of|board (?:chair|chairman|member|advisor))\b",
@@ -202,7 +202,8 @@ def _commercial_support_signals(facts: dict[str, list[dict]]) -> tuple[bool, boo
     )
     component_pattern = re.compile(
         r"\b(?:camera\w*|imaging|video stream\w*|augmented.reality|ground interface\w*|"
-        r"display\w*|hmd|headset\w*|telepresence|low.latency video|communication\w*)\b",
+        r"display\w*|hmd|headset\w*|telepresence|low.latency video|"
+        r"live video communication\w*|visual communication\w*)\b",
         re.IGNORECASE,
     )
     texts = [

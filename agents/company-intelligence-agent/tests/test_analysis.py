@@ -10,6 +10,25 @@ from company_intel.analysis import (
 
 
 class LocalAnalysisTests(unittest.TestCase):
+    def test_historical_wireless_communication_is_not_a_visual_component(self):
+        facts = {category: [] for category in CATEGORIES}
+        facts["technology"] = [{
+            "statement": (
+                "Hedy Lamarr's pioneering work on frequency-hopping communication "
+                "laid foundations for modern wireless technology."
+            ),
+            "evidence_quote": (
+                "Hedy Lamarr's pioneering work on frequency-hopping communication "
+                "laid foundations for modern wireless technology."
+            ),
+        }]
+        facts["applications"] = [{
+            "statement": "The company pioneers BVLOS drone flights for building inspections.",
+            "evidence_quote": "BVLOS drone flights for large-scale building inspections.",
+        }]
+
+        self.assertEqual(_commercial_support_signals(facts), (False, False))
+
     def test_distinguishes_robot_vision_from_human_visual_interface_need(self):
         robot_facts = {category: [] for category in CATEGORIES}
         robot_facts["technology"] = [{
