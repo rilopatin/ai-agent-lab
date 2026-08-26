@@ -14,7 +14,7 @@ CATEGORIES = (
     "leadership", "products", "technology", "applications",
     "funding", "locations", "news",
 )
-ANALYSIS_VERSION = "2.4.2-verification-aware-scoring"
+ANALYSIS_VERSION = "2.5.3-human-visual-need-guard"
 LEADERSHIP_ROLE_PATTERN = re.compile(
     r"\b(?:co[- ]?founder|founder|ceo|cto|cfo|coo|chief\s+[a-z]+(?:\s+[a-z]+)?"
     r"|president|vice president|vp|svp|director|head of|board (?:chair|chairman|member|advisor))\b",
@@ -187,6 +187,34 @@ def _empty_assessment(status: str = "not_assessed") -> dict:
         "confidence": "insufficient_evidence",
         "missing_evidence": [],
     }
+
+
+def _commercial_support_signals(facts: dict[str, list[dict]]) -> tuple[bool, bool]:
+    human_pattern = re.compile(
+        r"\b(?:human|operator\w*|user\w*|pilot\w*|driver\w*|crew\w*|"
+        r"firefighter\w*|first responder\w*|law enforcement|personnel)\b",
+        re.IGNORECASE,
+    )
+    visual_pattern = re.compile(
+        r"\b(?:video|visual|view|camera|imaging|interface|display|situational awareness|"
+        r"augmented.reality|hmd|headset|telepresence)\w*\b",
+        re.IGNORECASE,
+    )
+    component_pattern = re.compile(
+        r"\b(?:camera\w*|imaging|video stream\w*|augmented.reality|ground interface\w*|"
+        r"display\w*|hmd|headset\w*|telepresence|low.latency video|communication\w*)\b",
+        re.IGNORECASE,
+    )
+    texts = [
+        f"{fact.get('statement', '')} {fact.get('evidence_quote', '')}"
+        for category in ("products", "technology", "applications", "news")
+        for fact in facts.get(category, [])
+    ]
+    human_visual_need = any(
+        human_pattern.search(text) and visual_pattern.search(text) for text in texts
+    )
+    complementary_visual_component = any(component_pattern.search(text) for text in texts)
+    return human_visual_need, complementary_visual_component
 
 
 def _load_decision_profile(path: str | Path = "config/hypervision_decision_profile.json") -> dict:
@@ -612,6 +640,35 @@ def _commercial_assessment(
         result["customer_partner_scoring"][key] = (
             max(0, min(maximum, value)) if isinstance(value, int) else 0
         )
+    human_visual_need, complementary_visual_component = _commercial_support_signals(facts)
+    if not human_visual_need:
+        result["customer_partner_scoring"]["human_perception_need"] = min(
+            1, result["customer_partner_scoring"]["human_perception_need"]
+        )
+        result["relationship_types"] = [
+            value for value in result["relationship_types"] if value != "customer"
+        ]
+    if not human_visual_need and not complementary_visual_component:
+        result["customer_partner_scoring"]["human_perception_need"] = 0
+        result["customer_partner_scoring"]["integration_fit"] = 0
+        result["customer_partner_scoring"]["commercial_capacity"] = 0
+        result["relationship_types"] = [
+            value for value in result["relationship_types"]
+            if value not in {"customer", "technology_partner", "integrator_or_channel"}
+        ]
+        if not result["relationship_types"]:
+            result["relationship_types"] = ["no_supported_fit"]
+        result["relationship_hypothesis"] = (
+            "No supported customer or technology-partner fit is established from the verified facts."
+        )
+        result["hypervision_relevance"] = (
+            "The verified facts do not establish a human visual-interface need or a complementary "
+            "camera, video, display, HMD, telepresence, or communications component."
+        )
+        result["first_engagement"] = (
+            "Research whether the company has a human-operated visual workflow or a complementary "
+            "visual component before proposing a commercial engagement."
+        )
     has_commercial_evidence = bool(facts.get("funding")) or any(
         re.search(
             r"\b(?:revenue|sales|paid contract|customer contract|procurement|"
@@ -721,7 +778,7 @@ def _commercial_assessment(
         ]
     if not re.search(
         r"\b(?:propose|schedule|conduct|validate|arrange|request|offer|demonstrate|"
-        r"introduce|discuss|workshop|meeting|pilot|feasibility)\b",
+        r"introduce|discuss|research|investigate|workshop|meeting|pilot|feasibility)\b",
         result["first_engagement"], re.IGNORECASE,
     ):
         result["first_engagement"] = (
@@ -756,25 +813,26 @@ def _commercial_assessment(
     lift_assumptions = []
     derived_potential = result["confirmed_score"]
     scoring = result["customer_partner_scoring"]
-    if scoring["timing_and_access"] == 0 and re.search(
+    supported_customer_partner_basis = human_visual_need or complementary_visual_component
+    if supported_customer_partner_basis and scoring["timing_and_access"] == 0 and re.search(
         r"\b(?:current relationship|warm access|active joint work|procurement|"
         r"named opportunity|named buyer|commercial opportunity)\b", verification_text,
     ):
         derived_potential += 1
         lift_assumptions.append("a current route, active opportunity, or procurement path is verified")
-    if scoring["commercial_capacity"] < 2 and re.search(
+    if supported_customer_partner_basis and scoring["commercial_capacity"] < 2 and re.search(
         r"\b(?:budget|commercial capacity|purchasing capacity|procurement budget|"
         r"funded pilot|customer contract)\b", verification_text,
     ):
         derived_potential += 2 - scoring["commercial_capacity"]
         lift_assumptions.append("budget or procurement capacity for a paid pilot is verified")
-    if scoring["integration_fit"] < 3 and re.search(
+    if supported_customer_partner_basis and scoring["integration_fit"] < 3 and re.search(
         r"\b(?:integrat|interface|compatib|architecture|responsibilit)\w*\b",
         verification_text,
     ):
         derived_potential += 3 - scoring["integration_fit"]
         lift_assumptions.append("technical interfaces and architecture compatibility are verified")
-    if scoring["human_perception_need"] < 4 and re.search(
+    if supported_customer_partner_basis and scoring["human_perception_need"] < 4 and re.search(
         r"\b(?:operator pain|operator workflow|field.of.view pain|quantified need|"
         r"mission.critical perception)\b", verification_text,
     ):
@@ -788,6 +846,8 @@ def _commercial_assessment(
         )
     if result["geography"]["eligibility"] == "excluded_geography":
         result["verification_status"] = "excluded"
+    elif not supported_customer_partner_basis:
+        result["verification_status"] = "research_needed"
     elif result["confirmed_score"] >= 7 and result["confidence"] in {"high", "medium"}:
         result["verification_status"] = "qualified"
     elif result["potential_score"] >= 7 or result["confirmed_score"] >= 4:
@@ -796,6 +856,41 @@ def _commercial_assessment(
         result["verification_status"] = "low_fit"
     else:
         result["verification_status"] = "research_needed"
+    if not supported_customer_partner_basis:
+        result["relationship_types"] = [
+            value for value in result["relationship_types"]
+            if value not in {"customer", "technology_partner", "integrator_or_channel"}
+        ]
+        if not result["investor_scoring"]["applicable"]:
+            result["relationship_types"] = [
+                value for value in result["relationship_types"] if value != "investor"
+            ]
+        if not result["relationship_types"]:
+            result["relationship_types"] = ["no_supported_fit"]
+        result["customer_partner_scoring"]["rationale"] = (
+            "The verified facts describe machine or autonomous-system perception, not a "
+            "human visual-interface need or a complementary visual component for HyperVision."
+        )
+        result["potential_score_rationale"] = (
+            "No potential score is assigned until a human-operated visual workflow or a "
+            "complementary camera, video, display, HMD, telepresence, or communications "
+            "component is verified."
+        )
+        result["need_evidence_refs"] = []
+        result["integration_dependencies"] = [
+            "A human-operated visual workflow or complementary visual component must first be identified."
+        ]
+        result["verification_questions"] = [
+            "Does the company have a human-operated workflow in which peripheral visual context matters?",
+            "Does the company supply a camera, video, display, HMD, telepresence, or communications component that could form a supported joint architecture?",
+        ]
+        result["risks"] = [
+            "No verified basis currently connects the company's technology to HyperVision's human visual-interface offering."
+        ]
+        result["missing_evidence"] = [
+            "Evidence of a human-operated visual workflow or complementary visual component.",
+            "Company incorporation, headquarters and ownership require verification.",
+        ]
     return result
 
 

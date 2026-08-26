@@ -5,11 +5,107 @@ from pathlib import Path
 
 from company_intel.analysis import (
     CATEGORIES, AnalysisError, analyze_all_evidence, analyze_evidence_file,
-    analyze_profile, _fact_is_sane,
+    analyze_profile, _commercial_support_signals, _fact_is_sane,
 )
 
 
 class LocalAnalysisTests(unittest.TestCase):
+    def test_distinguishes_robot_vision_from_human_visual_interface_need(self):
+        robot_facts = {category: [] for category in CATEGORIES}
+        robot_facts["technology"] = [{
+            "statement": "Autonomous robots use advanced sensors and AI vision for navigation.",
+            "evidence_quote": "Autonomous robots use advanced sensors and AI vision for navigation.",
+        }]
+        self.assertEqual(_commercial_support_signals(robot_facts), (False, False))
+
+        operator_facts = {category: [] for category in CATEGORIES}
+        operator_facts["products"] = [{
+            "statement": "The interface sends live camera video to a remote operator.",
+            "evidence_quote": "The interface sends live camera video to a remote operator.",
+        }]
+        self.assertEqual(_commercial_support_signals(operator_facts), (True, True))
+
+        camera_partner_facts = {category: [] for category in CATEGORIES}
+        camera_partner_facts["products"] = [{
+            "statement": "The panoramic camera provides low-latency video streams.",
+            "evidence_quote": "The panoramic camera provides low-latency video streams.",
+        }]
+        self.assertEqual(_commercial_support_signals(camera_partner_facts), (False, True))
+
+    def test_robot_machine_vision_cannot_score_as_hypervision_fit(self):
+        profile = {
+            "company": "Robot Vision Co", "website": "https://robot.example",
+            "extraction_status": "evidence_ready", "contacts": {"emails": []},
+            "evidence": {"technology": [{
+                "source_url": "https://robot.example/technology",
+                "source_title": "Technology",
+                "snippet": "Autonomous robots use AI vision sensors to navigate warehouses.",
+            }], "funding": [{
+                "source_url": "https://robot.example/funding",
+                "source_title": "Funding",
+                "snippet": "Robot Vision Co raised $100 million in Series B funding.",
+            }]},
+        }
+
+        def transport(endpoint, payload, timeout):
+            if "facts" in payload["format"]["properties"]:
+                facts = {category: [] for category in CATEGORIES}
+                prompt = payload["messages"][1]["content"]
+                if "technology" in prompt:
+                    facts["technology"] = [{
+                        "statement": "Autonomous robots use AI vision sensors to navigate warehouses.",
+                        "source_url": "https://robot.example/technology",
+                        "evidence_quote": "Autonomous robots use AI vision sensors to navigate warehouses.",
+                        "confidence": "high",
+                    }]
+                if "funding" in prompt:
+                    facts["funding"] = [{
+                        "statement": "Robot Vision Co raised $100 million in Series B funding.",
+                        "source_url": "https://robot.example/funding",
+                        "evidence_quote": "Robot Vision Co raised $100 million in Series B funding.",
+                        "confidence": "high",
+                    }]
+                return {"message": {"content": json.dumps({"summary": "", "facts": facts})}}
+            assessment = {
+                "relationship_types": ["technology_partner", "investor"],
+                "relationship_hypothesis": "HMD could improve robot vision.",
+                "need_evidence_refs": ["technology.1"],
+                "hypervision_relevance": "HyperVision could improve autonomous robot perception.",
+                "integration_dependencies": ["AI sensor interface"],
+                "first_engagement": "Propose an integration workshop.",
+                "risks": ["No human operator is evidenced."],
+                "potential_score": 8, "potential_score_rationale": "If integration is verified.",
+                "verification_questions": ["Can HyperVision integrate with the robot AI?"],
+                "customer_partner_scoring": {
+                    "human_perception_need": 2, "integration_fit": 2,
+                    "commercial_capacity": 2, "timing_and_access": 0,
+                    "rationale": "The robot needs visual perception.",
+                },
+                "investor_scoring": {
+                    "applicable": False, "thesis_fit": 0, "stage_and_check_fit": 0,
+                    "strategic_leverage": 0, "track_record_and_capacity": 0,
+                    "timing_and_geography": 0, "rationale": "Not an investor.",
+                },
+                "geography": {
+                    "incorporation_country": "", "headquarters_country": "",
+                    "russian_company": "unknown", "eligibility": "unverified",
+                    "israel_connection": "not_verified", "ukraine_connection": "not_verified",
+                    "affinity_modifier": 0, "evidence_refs": [],
+                },
+                "confidence": "medium", "missing_evidence": ["Human operator workflow"],
+            }
+            return {"message": {"content": json.dumps(assessment)}}
+
+        assessment = analyze_profile(profile, transport=transport)["commercial_assessment"]
+        self.assertEqual(assessment["relationship_types"], ["no_supported_fit"])
+        self.assertEqual(assessment["confirmed_score"], 0)
+        self.assertEqual(assessment["potential_score"], 0)
+        self.assertEqual(assessment["verification_status"], "research_needed")
+        self.assertNotIn("improve robot vision", assessment["customer_partner_scoring"]["rationale"])
+        self.assertEqual(assessment["need_evidence_refs"], [])
+        self.assertIn("human-operated workflow", assessment["verification_questions"][0])
+        self.assertNotIn("budget", " ".join(assessment["verification_questions"]).casefold())
+
     def test_builds_evidence_grounded_commercial_assessment(self):
         profile = {
             "company": "Operator Vision Co",
