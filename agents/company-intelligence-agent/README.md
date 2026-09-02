@@ -174,3 +174,38 @@ The relevance score is deterministic and explainable. It awards independent
 signals for imaging/computer vision, defense and security use cases, aerial
 autonomy, relevant sensors, detection/tracking, and integration potential.
 Companies without verified analysis remain visible but are not scored.
+
+### Publish reports to Dropbox
+
+The agent publishes to a normal Dropbox-synced local folder; no Dropbox API or
+cloud credentials are required. Publish the newest complete HTML/CSV pair with:
+
+```cmd
+set PYTHONPATH=src && python -m company_intel publish --dropbox-dir "C:\path\to\Dropbox\HyperVision\Company Intelligence"
+```
+
+The folder always contains `latest_report.html` and `latest_report.csv`. Before
+they are replaced, the previous pair is archived in the same folder under its
+creation date, for example `company_report_2026-09-01_09-00-00.html` and `.csv`.
+Publishing is atomic and refuses to replace an incomplete latest pair.
+
+Run the complete workflow (scan, crawl, extract, analyze, report and publish)
+with one command:
+
+```cmd
+set PYTHONPATH=src && python -m company_intel run-weekly --dropbox-dir "C:\path\to\Dropbox\HyperVision\Company Intelligence"
+```
+
+If a stage fails, the workflow stops and the existing Dropbox report is left
+unchanged.
+
+Install the workflow as a weekly Windows task (Monday at 09:00 by default):
+
+```cmd
+set PYTHONPATH=src && python -m company_intel install-weekly --dropbox-dir "C:\path\to\Dropbox\HyperVision\Company Intelligence"
+```
+
+The frequency is currently fixed to weekly. The day and time can be selected
+during installation with `--day` and `--time`. The generated runner writes its
+output to `data\weekly_report.log`. Windows is configured to start a missed run
+when the laptop becomes available and to allow the task to continue on battery.

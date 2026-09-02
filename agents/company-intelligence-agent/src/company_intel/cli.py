@@ -18,6 +18,8 @@ from .analysis import (
     export_analysis, export_analysis_batch, latest_evidence,
 )
 from .reporting import export_report, latest_analysis
+from .publishing import PublishError, latest_report_pair, publish_report_pair
+from .weekly import WeeklyRunError, install_windows_weekly_task, run_weekly_pipeline
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -95,6 +97,28 @@ def build_parser() -> argparse.ArgumentParser:
     )
     report.add_argument("--input", help="analysis JSON; defaults to latest full analysis")
     report.add_argument("--export-dir", default="data/exports")
+    publish = subparsers.add_parser(
+        "publish", help="publish the latest report pair to a Dropbox-synced folder"
+    )
+    publish.add_argument("--dropbox-dir", required=True)
+    publish.add_argument("--export-dir", default="data/exports")
+    weekly = subparsers.add_parser(
+        "run-weekly", help="run the complete company intelligence workflow and publish it"
+    )
+    weekly.add_argument("--dropbox-dir", required=True)
+    weekly.add_argument("--export-dir", default="data/exports")
+    weekly.add_argument("--database", default="data/company_intelligence.db")
+    weekly.add_argument(
+        "--checkpoint", default="data/analysis/company_analysis_checkpoint.json"
+    )
+    weekly.add_argument("--model", default="qwen3:8b")
+    schedule = subparsers.add_parser(
+        "install-weekly", help="install the weekly run in Windows Task Scheduler"
+    )
+    schedule.add_argument("--dropbox-dir", required=True)
+    schedule.add_argument("--day", default="MON")
+    schedule.add_argument("--time", default="09:00")
+    schedule.add_argument("--task-name", default="HyperVision Company Intelligence Weekly")
     return parser
 
 
@@ -112,6 +136,36 @@ def apply_url_overrides(companies, path: str):
 
 def main(argv: list[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
+    if args.command == "install-weekly":
+        try:
+            result = install_windows_weekly_task(
+                args.dropbox_dir, Path.cwd(), args.day, args.time, args.task_name
+            )
+        except (OSError, WeeklyRunError) as exc:
+            print(f"schedule installation failed: {exc}", file=sys.stderr)
+            return 1
+        print(json.dumps(result, indent=2))
+        return 0
+    if args.command == "run-weekly":
+        try:
+            result = run_weekly_pipeline(
+                args.dropbox_dir, args.export_dir, args.database,
+                args.checkpoint, args.model,
+            )
+        except (FileNotFoundError, OSError, PublishError, WeeklyRunError) as exc:
+            print(f"weekly run failed: {exc}", file=sys.stderr)
+            return 1
+        print(json.dumps(result, indent=2))
+        return 0
+    if args.command == "publish":
+        try:
+            html_path, csv_path = latest_report_pair(args.export_dir)
+            result = publish_report_pair(html_path, csv_path, args.dropbox_dir)
+        except (FileNotFoundError, OSError, PublishError) as exc:
+            print(f"publish failed: {exc}", file=sys.stderr)
+            return 1
+        print(json.dumps(result, indent=2))
+        return 0
     if args.command == "report":
         try:
             input_path = Path(args.input) if args.input else latest_analysis(args.export_dir)
